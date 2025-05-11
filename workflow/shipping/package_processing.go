@@ -21,6 +21,8 @@ func RegisterWorkflow(w worker.Worker) {
 
 	// Register your activities here
 	w.RegisterActivityWithOptions(validatePayment, activity.RegisterOptions{Name: "validatePayment"})
+	w.RegisterActivityWithOptions(shipProduct, activity.RegisterOptions{Name: "shipProduct"})
+
 }
 
 // Order represents an order with basic details like the ID, customer name, and order amount.
@@ -61,6 +63,11 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 	// Once the payment is validated, we proceed to ship the package.
 	// The ship the package activity is called to simulate the shipping process.
 	// If shipping fails or encounters an error, the workflow returns an error.
+	var shipmentValidationResult string
+	err = workflow.ExecuteActivity(ctx, shipProduct, order).Get(ctx, &shipmentValidationResult)
+	if err != nil {
+		return "", fmt.Errorf("validate shipment for order: %v", err)
+	}
 
 	// Step 3: Return a success message
 	// If both payment validation and shipping were successful, we return a success message indicating the order was processed.
@@ -70,5 +77,25 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 // Add an activity here that validates a payment.
 // The validation fails if the order amount is greater than 25 (for example, due to payment policy restrictions).
 func validatePayment(ctx context.Context, order Order) (string, error) {
-	return "", nil
+	// Simulate a failure if this is the 0th or 1st attempt
+	info := activity.GetInfo(ctx)
+	if info.Attempt < 2 {
+		activity.GetLogger(ctx).Info("Temporary failure in payment processing")
+		return "", fmt.Errorf("temporary issue, please retry")
+	}
+
+	if order.Amount > 25 {
+		return "", fmt.Errorf("validation failed for order amount: %f being larger than 25", order.Amount)
+	}
+	activity.GetLogger(ctx).Info("Payment has compliant values.")
+	return "Validation succesful", nil
+}
+
+// The validation fails if the address is empty.
+func shipProduct(ctx context.Context, order Order) (string, error) {
+	if order.Customer == "" {
+		return "", fmt.Errorf("shipment failed because of empty address")
+	}
+	activity.GetLogger(ctx).Info("Shipment is completed.")
+	return "Shipment succesful", nil
 }
