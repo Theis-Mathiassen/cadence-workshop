@@ -3,8 +3,10 @@ package shipping
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
+	"go.uber.org/cadence"
 	"go.uber.org/cadence/activity"
 	"go.uber.org/cadence/worker"
 	"go.uber.org/cadence/workflow"
@@ -25,6 +27,11 @@ func RegisterWorkflow(w worker.Worker) {
 
 }
 
+// Estimate delivery time, just random number so far.
+func estimatedDeliveryTime(ctx context.Context, order Order, currentLocation string) (int, error) {
+	return rand.IntN(3) + 1, nil
+}
+
 // Order represents an order with basic details like the ID, customer name, and order amount.
 type Order struct {
 	ID       string  `json:"id"`
@@ -34,12 +41,44 @@ type Order struct {
 	SendFrom string  `json:"sendFrom"`
 }
 
+type ScanSignalValue struct {
+	Location string `json:"location"`
+}
+
+type QueryResult struct {
+	Delivered       bool     `json:"delivered"`
+	LocationHistory []string `json:"locationHistory"`
+}
+
 // PackageProcessingWorkflow processes an order through several steps:
 // 1. It first validates the payment for the order.
 // 2. Then, it proceeds to ship the package.
 // 3. Finally, it returns a result indicating success or failure based on the payment and shipping status.
 func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error) {
+	locations := []string{order.SendFrom}
+	packageDelivered := false
+
+	//Handle queries by the user
+	err := workflow.SetQueryHandler(ctx, "current_status", func() (QueryResult, error) {
+		return QueryResult{
+			Delivered:       packageDelivered,
+			LocationHistory: locations,
+		}, nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("set query handler: %v", err)
+	}
+
+	// Retry policy configuration: exponential backoff with a maximum of 3 retries.
+	var paymentRetryPolicy = &cadence.RetryPolicy{
+		InitialInterval:    1 * time.Second,  // Start with 1 second.
+		BackoffCoefficient: 2.0,              // Exponential backoff.
+		MaximumInterval:    10 * time.Second, // Max retry interval.
+		MaximumAttempts:    3,                // Retry up to 3 times.
+	}
+
 	ao := workflow.ActivityOptions{
+		RetryPolicy:            paymentRetryPolicy,
 		ScheduleToStartTimeout: time.Minute,
 		StartToCloseTimeout:    time.Minute,
 	}
@@ -54,7 +93,7 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 	// In this example, we simulate the payment validation by calling the `validatePayment` activity.
 	// If validation fails, the workflow stops early and returns an appropriate error.
 	var paymentValidationResult string
-	err := workflow.ExecuteActivity(ctx, validatePayment, order).Get(ctx, &paymentValidationResult)
+	err = workflow.ExecuteActivity(ctx, validatePayment, order).Get(ctx, &paymentValidationResult)
 	if err != nil {
 		return "", fmt.Errorf("validate payment for order: %v", err)
 	}
@@ -67,6 +106,28 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 	err = workflow.ExecuteActivity(ctx, shipProduct, order).Get(ctx, &shipmentValidationResult)
 	if err != nil {
 		return "", fmt.Errorf("validate shipment for order: %v", err)
+	}
+
+	//Step 3 scan the package
+	signalChan := workflow.GetSignalChannel(ctx, "ScanSignal")
+
+	s := workflow.NewSelector(ctx)
+	s.AddReceive(signalChan, func(c workflow.Channel, more bool) {
+		var signalVal ScanSignalValue
+		c.Receive(ctx, &signalVal)
+		workflow.GetLogger(ctx).Info("Received signal!", zap.Any("signal", "ScanSignal"), zap.Any("value", signalVal))
+		locations = append(locations, signalVal.Location)
+	})
+
+	//Make a channel for delivering the package
+	deliveredChan := workflow.GetSignalChannel(ctx, "DeliveredSignal")
+	s.AddReceive(deliveredChan, func(c workflow.Channel, more bool) {
+		packageDelivered = true
+	})
+
+	for !packageDelivered {
+		s.Select(ctx)
+
 	}
 
 	// Step 3: Return a success message
