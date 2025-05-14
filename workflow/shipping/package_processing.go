@@ -126,6 +126,9 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 	if err != nil {
 		return "", fmt.Errorf("set query handler: %v", err)
 	}
+	// Important: We need to use the Cadence supplied logger.
+	logger := workflow.GetLogger(ctx)
+	logger.Info("Starting PackageProcessingWorkflow", zap.String("orderID", order.ID), zap.String("customer", order.Customer))
 
 	// Retry policy configuration: exponential backoff with a maximum of 3 retries.
 	var paymentRetryPolicy = &cadence.RetryPolicy{
@@ -135,23 +138,19 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 		MaximumAttempts:    3,                // Retry up to 3 times.
 	}
 
-	ao := workflow.ActivityOptions{
+	var activityOptions = workflow.ActivityOptions{
 		RetryPolicy:            paymentRetryPolicy,
 		ScheduleToStartTimeout: time.Minute,
 		StartToCloseTimeout:    time.Minute,
 	}
-	ctx = workflow.WithActivityOptions(ctx, ao)
-
-	// Important: We need to use the Cadence supplied logger.
-	logger := workflow.GetLogger(ctx)
-	logger.Info("Starting PackageProcessingWorkflow", zap.String("orderID", order.ID), zap.String("customer", order.Customer))
+	activityCtx := workflow.WithActivityOptions(ctx, activityOptions)
 
 	// Step 1: Validate the payment.
 	// The payment validation step checks if the payment for the order is valid.
 	// In this example, we simulate the payment validation by calling the `validatePayment` activity.
 	// If validation fails, the workflow stops early and returns an appropriate error.
 	var paymentValidationResult string
-	err = workflow.ExecuteActivity(ctx, validatePayment, order).Get(ctx, &paymentValidationResult)
+	err = workflow.ExecuteActivity(activityCtx, validatePayment, order).Get(ctx, &paymentValidationResult)
 	if err != nil {
 		return "", fmt.Errorf("validate payment for order: %v", err)
 	}
