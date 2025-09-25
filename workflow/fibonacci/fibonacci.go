@@ -24,7 +24,6 @@ package helloworld
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"go.uber.org/cadence/activity"
@@ -34,21 +33,17 @@ import (
 )
 
 const (
-	WorkflowName = "HelloWorld"
-	ActivityName = "HelloWorldActivity"
+	WorkflowName = "Fibonacci"
+	ActivityName = "FibonacciActivity"
 )
 
 // RegisterWorkflow registers the HelloWorldWorkflow.
 func RegisterWorkflow(w worker.Worker) {
-	w.RegisterWorkflowWithOptions(HelloWorldWorkflow, workflow.RegisterOptions{Name: WorkflowName})
-	w.RegisterActivityWithOptions(HelloWorldActivity, activity.RegisterOptions{
+	w.RegisterWorkflowWithOptions(FibonacciWorkflow, workflow.RegisterOptions{Name: WorkflowName})
+	w.RegisterActivityWithOptions(FibonacciActivity, activity.RegisterOptions{
 		Name:                ActivityName,
 		EnableAutoHeartbeat: true,
 	})
-}
-
-type helloWorldInput struct {
-	Message string `json:"message"`
 }
 
 type fibInput struct {
@@ -56,7 +51,7 @@ type fibInput struct {
 }
 
 // HelloWorldWorkflow greets the caller.
-func HelloWorldWorkflow(ctx workflow.Context, input helloWorldInput) (string, error) {
+func FibonacciWorkflow(ctx workflow.Context, input fibInput) (string, error) {
 	ao := workflow.ActivityOptions{
 		ScheduleToStartTimeout: time.Minute,
 		StartToCloseTimeout:    time.Minute,
@@ -64,12 +59,12 @@ func HelloWorldWorkflow(ctx workflow.Context, input helloWorldInput) (string, er
 	ctx = workflow.WithActivityOptions(ctx, ao)
 
 	logger := workflow.GetLogger(ctx)
-	logger.Info("HelloWorldWorkflow started")
+	logger.Info("FibonacciWorkflow started")
 
 	var greetingMsg string
-	err := workflow.ExecuteActivity(ctx, HelloWorldActivity, input).Get(ctx, &greetingMsg)
+	err := workflow.ExecuteActivity(ctx, FibonacciActivity, input).Get(ctx, &greetingMsg)
 	if err != nil {
-		logger.Error("HelloWorldActivity failed", zap.Error(err))
+		logger.Error("FibonacciActivity failed", zap.Error(err))
 		return "", err
 	}
 
@@ -77,14 +72,7 @@ func HelloWorldWorkflow(ctx workflow.Context, input helloWorldInput) (string, er
 	return greetingMsg, nil
 }
 
-// HelloWorldActivity constructs the greeting message from input.
-func HelloWorldActivity(ctx context.Context, input helloWorldInput) (string, error) {
-	logger := activity.GetLogger(ctx)
-	logger.Info("HelloWorldActivity started")
-	return fmt.Sprintf("Hello, %s!", input.Message), nil
-}
-
 // Calc fibonacci number Compute heavy task
-func fib(ctx context.Context, input fibInput) {
+func FibonacciActivity(ctx context.Context, input fibInput) {
 
 }

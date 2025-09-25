@@ -143,14 +143,14 @@ func PackageProcessingWorkflow(ctx workflow.Context, order Order) (string, error
 		ScheduleToStartTimeout: time.Minute,
 		StartToCloseTimeout:    time.Minute,
 	}
-	activityCtx := workflow.WithActivityOptions(ctx, activityOptions)
+	ctx = workflow.WithActivityOptions(ctx, activityOptions)
 
 	// Step 1: Validate the payment.
 	// The payment validation step checks if the payment for the order is valid.
 	// In this example, we simulate the payment validation by calling the `validatePayment` activity.
 	// If validation fails, the workflow stops early and returns an appropriate error.
 	var paymentValidationResult string
-	err = workflow.ExecuteActivity(activityCtx, validatePayment, order).Get(ctx, &paymentValidationResult)
+	err = workflow.ExecuteActivity(ctx, validatePayment, order).Get(ctx, &paymentValidationResult)
 	if err != nil {
 		return "", fmt.Errorf("validate payment for order: %v", err)
 	}
